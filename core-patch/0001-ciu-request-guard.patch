@@ -1,0 +1,120 @@
+diff --git a/ciu/server.py b/ciu/server.py
+index 21d62a7..713ed44 100644
+--- a/ciu/server.py
++++ b/ciu/server.py
+@@ -33,6 +33,67 @@ MODEL_DIR = Path.home() / ".ciu" / "models"
+ app = FastAPI(title="CIU")
+ runner = LlamaRunner()
+ 
++
++# ---------------------------------------------------------- request guard
++#
++# CIU listens on loopback, but loopback is not private from the browser. Any
++# website the user visits can send requests to 127.0.0.1:8674: a form post to
++# /api/unload, or a text/plain POST to /v1/chat/completions that burns the
++# GPU. With DNS rebinding a site can even read the responses. Two checks
++# close that:
++#
++#   Host   must name loopback. A rebound domain arrives with its own name in
++#          Host, so this alone defeats DNS rebinding.
++#   Origin browsers attach it to every cross-origin request and to all POSTs,
++#          and pages cannot forge it. No Origin means a non-browser client
++#          (curl, a Blender or Godot addon, a script), which is allowed.
++#          Browser extensions (the CIU Browser extension and any other
++#          extension the user installed) are allowed, as is CIU's own page.
++#          Ordinary websites are refused.
++#
++# CIU_ALLOWED_ORIGINS adds origins, comma separated, for a local web app the
++# user wants to connect on purpose.
++
++import os  # noqa: E402
++
++_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
++_EXTENSION_SCHEMES = ("chrome-extension://", "moz-extension://",
++                      "safari-web-extension://")
++
++
++def _host_name(host_header: str) -> str:
++    h = host_header.strip().lower()
++    if h.startswith("["):
++        return h[: h.find("]") + 1]
++    return h.rsplit(":", 1)[0] if ":" in h else h
++
++
++def _origin_allowed(origin: str) -> bool:
++    origin = origin.strip().lower()
++    if origin.startswith(_EXTENSION_SCHEMES):
++        return True
++    own = {f"http://{h}:{PORT}" for h in ("127.0.0.1", "localhost", "[::1]")}
++    extra = {o.strip().lower().rstrip("/")
++             for o in os.environ.get("CIU_ALLOWED_ORIGINS", "").split(",")
++             if o.strip()}
++    return origin in own or origin in extra
++
++
++@app.middleware("http")
++async def guard(request: Request, call_next):
++    host = request.headers.get("host", "")
++    if _host_name(host) not in _LOOPBACK_HOSTS:
++        return JSONResponse(status_code=403, content={"error": {
++            "message": "CIU only answers requests addressed to this machine.",
++            "type": "ciu_forbidden_host"}})
++    origin = request.headers.get("origin")
++    if origin is not None and not _origin_allowed(origin):
++        return JSONResponse(status_code=403, content={"error": {
++            "message": (f"Requests from {origin} are not allowed. Set "
++                        f"CIU_ALLOWED_ORIGINS to allow a local web app."),
++            "type": "ciu_forbidden_origin"}})
++    return await call_next(request)
++
+ _download = {"active": False, "model_id": None, "pct": 0.0, "error": None}
+ 
+ 
+diff --git a/tests/test_guard.py b/tests/test_guard.py
+new file mode 100644
+index 0000000..f71b59f
+--- /dev/null
++++ b/tests/test_guard.py
+@@ -0,0 +1,42 @@
++"""The request guard: websites must not be able to drive CIU.
++
++Run with: python -m pytest tests/test_guard.py
++"""
++from fastapi.testclient import TestClient
++
++from ciu.server import app
++
++c = TestClient(app, base_url="http://127.0.0.1:8674")
++
++
++def code(method, path, **kw):
++    return c.request(method, path, **kw).status_code
++
++
++def test_non_browser_clients_allowed():
++    assert code("GET", "/api/status") == 200
++
++
++def test_extensions_allowed():
++    for o in ("chrome-extension://abc", "moz-extension://abc"):
++        assert code("POST", "/v1/chat/completions", headers={"origin": o}, json={}) != 403
++
++
++def test_own_page_allowed():
++    assert code("POST", "/api/unload", headers={"origin": "http://127.0.0.1:8674"}) == 200
++
++
++def test_websites_refused():
++    for o in ("https://evil.example", "http://localhost:3000", "null"):
++        assert code("POST", "/api/unload", headers={"origin": o}) == 403
++        assert code("POST", "/v1/chat/completions", headers={
++            "origin": o, "content-type": "text/plain"}, content="{}") == 403
++
++
++def test_dns_rebinding_refused():
++    assert code("GET", "/api/status", headers={"host": "rebind.example:8674"}) == 403
++
++
++def test_allowlist_env(monkeypatch):
++    monkeypatch.setenv("CIU_ALLOWED_ORIGINS", "http://localhost:3000")
++    assert code("POST", "/api/unload", headers={"origin": "http://localhost:3000"}) == 200

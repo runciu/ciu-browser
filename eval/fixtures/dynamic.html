@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Live departures | Alva Bus Station</title></head>
+<body><main><h1>Live departures</h1><div id="board">Loading departures…</div></main>
+<script>
+setTimeout(() => {
+  const rows = [["62", "Stirling", "14:05", "On time"], ["62", "Alloa", "14:12", "Delayed 6 min"], ["X99", "Edinburgh", "14:30", "Cancelled"]];
+  const t = document.createElement("table");
+  t.innerHTML = "<thead><tr><th>Service</th><th>To</th><th>Due</th><th>Status</th></tr></thead>";
+  for (const r of rows) { const tr = document.createElement("tr"); r.forEach((c) => { const td = document.createElement("td"); td.textContent = c; tr.append(td); }); t.append(tr); }
+  const board = document.getElementById("board"); board.textContent = ""; board.append(t);
+}, 300);
+</script></body></html>

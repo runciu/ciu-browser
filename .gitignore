@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.eval/
+eval/results/
+e2e-shots/
+.e2e-granted/
+.release/
+release/
+*.zip

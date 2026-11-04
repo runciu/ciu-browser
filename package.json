@@ -1,0 +1,34 @@
+{
+  "name": "ciu-browser",
+  "version": "0.1.6",
+  "description": "CIU Browser: a browser extension that uses the local CIU model",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "mock-ciu": "node tools/mock-ciu.mjs",
+    "eval": "esbuild eval/run.ts --bundle --platform=node --format=esm --packages=external --log-level=warning --outfile=.eval/run.mjs && node .eval/run.mjs",
+    "package": "npm run build && node tools/package.mjs",
+    "e2e": "node tools/e2e.mjs",
+    "check-real-ciu": "node tools/check-real-ciu.mjs"
+  },
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@types/chrome": "^0.3.7",
+    "@types/jsdom": "^30.0.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.3",
+    "playwright-core": "^1.64.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "private": true,
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/runciu/ciu-browser.git"
+  },
+  "homepage": "https://runciu.com"
+}

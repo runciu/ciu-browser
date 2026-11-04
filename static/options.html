@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CIU Browser settings</title>
+  <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body class="options">
+  <main>
+    <h1>CIU Browser</h1>
+    <p class="lede">Uses the model already loaded in CIU. Nothing is sent anywhere except the CIU server on this machine.</p>
+
+    <form id="form">
+      <section>
+        <h2>Connection</h2>
+        <label>CIU address
+          <input id="endpoint" type="url" required spellcheck="false">
+          <span class="hint">Must be on this machine. Default: http://127.0.0.1:8674</span>
+        </label>
+        <div class="row">
+          <button class="btn" type="button" id="test">Test connection</button>
+          <span id="testResult" class="hint" role="status"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Answers</h2>
+        <label>Longest answer, in tokens
+          <input id="maxOutputTokens" type="number" min="64" max="8192" step="64">
+          <span class="hint">On a 4K context, 768 leaves room for about 9,000 characters of page text.</span>
+        </label>
+        <label>Sections per task
+          <input id="maxSections" type="number" min="1" max="100">
+          <span class="hint">Long pages are read in sections, one model call each. More sections cover more of the page and take longer.</span>
+        </label>
+        <label>Creativity (temperature)
+          <input id="temperature" type="number" min="0" max="2" step="0.1">
+        </label>
+        <label>Translate into
+          <input id="translateTo" type="text">
+        </label>
+        <label class="check"><input id="thinking" type="checkbox"> Let thinking models reason before answering
+          <span class="hint">Slower, and reasoning uses up context. Off is best on small contexts.</span>
+        </label>
+        <label>Context size if CIU does not report one
+          <input id="fallbackCtx" type="number" min="1024" step="1024">
+        </label>
+      </section>
+
+      <section>
+        <h2>History</h2>
+        <label class="check"><input id="keepHistory" type="checkbox"> Keep conversations for each page on this computer</label>
+        <label>Delete history older than (days, 0 keeps it until cleared)
+          <input id="historyDays" type="number" min="0" max="3650">
+        </label>
+        <div class="row">
+          <button class="btn danger" type="button" id="clearHistory">Delete all history</button>
+          <span id="historyStats" class="hint"></span>
+        </div>
+      </section>
+
+      <div class="row sticky">
+        <button class="btn primary" type="submit">Save</button>
+        <span id="saved" class="hint" role="status"></span>
+      </div>
+    </form>
+
+    <section>
+      <h2>Sites CIU can read</h2>
+      <p class="hint">CIU reads a page only when you press a button in the panel. These are the sites it is allowed to read without clicking the toolbar icon first. Removing one takes effect immediately.</p>
+      <ul id="sites" class="sites"></ul>
+    </section>
+
+    <section>
+      <h2>Diagnostics</h2>
+      <pre id="diag" class="diag">Run "Test connection" to fill this in.</pre>
+    </section>
+  </main>
+  <script src="options.js" type="module"></script>
+</body>
+</html>

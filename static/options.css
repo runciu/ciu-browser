@@ -1,0 +1,22 @@
+body.options { display: block; font-size: 14px; }
+.options main { max-width: 640px; margin: 0 auto; padding: 32px 20px 64px; }
+.options h1 { margin: 0 0 4px; font-size: 22px; }
+.options h2 { font-size: 15px; margin: 0 0 12px; }
+.options .lede { color: var(--muted); margin: 0 0 24px; }
+.options section {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px;
+  display: grid; gap: 14px;
+}
+.options label { display: grid; gap: 4px; font-weight: 600; }
+.options label.check { display: block; font-weight: 500; }
+.options label.check .hint { display: block; margin-left: 22px; }
+.options input[type=url], .options input[type=text], .options input[type=number] {
+  padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-weight: 400; max-width: 360px;
+}
+.options .sticky { position: sticky; bottom: 12px; background: var(--bg); padding: 8px 0; margin-bottom: 16px; }
+.sites { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.sites li { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; }
+.sites li.none { font-family: var(--sans); color: var(--muted); }
+.diag { background: var(--sunken); padding: 10px; border-radius: 8px; font-size: 11px; max-height: 320px; overflow: auto; white-space: pre-wrap; margin: 0; }
+.ok { color: var(--ok); }
+.bad { color: var(--danger); }

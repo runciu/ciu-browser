@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Rate limits | Tidewater API docs</title></head>
+<body>
+<nav><ul><li>Overview</li><li>Authentication</li><li><b>Rate limits</b></li><li>Errors</li></ul></nav>
+<main>
+<h1>Rate limits</h1>
+<p>The Tidewater API limits how many requests each API key can make. Limits are applied per key, not per IP address.</p>
+<h2>Default limits</h2>
+<table><thead><tr><th>Plan</th><th>Requests per minute</th><th>Burst</th><th>Concurrent streams</th></tr></thead>
+<tbody><tr><td>Free</td><td>60</td><td>10</td><td>1</td></tr>
+<tr><td>Team</td><td>600</td><td>100</td><td>8</td></tr>
+<tr><td>Enterprise</td><td>6000</td><td>1000</td><td>64</td></tr></tbody></table>
+<h2>Response headers</h2>
+<p>Every response includes <code>X-RateLimit-Remaining</code>, the number of requests left in the current window, and <code>X-RateLimit-Reset</code>, the Unix time at which the window resets.</p>
+<h2>When you exceed a limit</h2>
+<p>The API returns HTTP <code>429 Too Many Requests</code> with a <code>Retry-After</code> header giving the number of seconds to wait. Clients should back off exponentially, starting at the Retry-After value and doubling up to a maximum of 64 seconds.</p>
+<pre><code>async function withRetry(fn, attempt = 0) {
+  const res = await fn();
+  if (res.status !== 429 || attempt >= 6) return res;
+  const wait = Math.min(64, Number(res.headers.get("Retry-After")) * 2 ** attempt);
+  await new Promise((r) => setTimeout(r, wait * 1000));
+  return withRetry(fn, attempt + 1);
+}</code></pre>
+<p>Streaming endpoints count once per stream, when the stream opens. A stream that stays open does not consume further requests.</p>
+</main>
+</body></html>

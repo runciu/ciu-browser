@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CIU</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="conn" id="conn" data-state="offline" title="Connection to CIU">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="brand">CIU</span>
+      <span class="model" id="model">Connecting</span>
+    </div>
+    <div class="bar-actions">
+      <button class="icon" id="newchat" title="Clear this page's conversation" aria-label="Clear this page's conversation">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="icon" id="settings" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="notice" id="notice" hidden></div>
+
+  <section class="page" id="page">
+    <div class="page-meta">
+      <div class="page-title" id="pageTitle">No page</div>
+      <div class="page-url" id="pageUrl"></div>
+    </div>
+  </section>
+
+  <section class="access" id="access" hidden aria-live="polite">
+    <p id="accessText">CIU cannot see this page yet.</p>
+    <div class="row">
+      <button class="btn small primary" id="allowSite" hidden>Allow on this site</button>
+      <button class="btn small" id="allowAll">Allow on all sites</button>
+    </div>
+    <p class="hint">Or click the CIU icon in the toolbar while on the page to let CIU read just this page. Either way, CIU only reads a page when you press a button here.</p>
+  </section>
+
+  <nav class="actions" aria-label="Page actions">
+    <button class="btn" id="summarise" data-needs="ready">Summarise page</button>
+    <button class="btn" id="explainSel" data-needs="ready" title="Explain the text you have selected on the page">Explain selection</button>
+    <button class="btn" id="extractToggle" data-needs="ready" aria-expanded="false" aria-controls="extract">Extract data</button>
+  </nav>
+
+  <section class="extract" id="extract" hidden>
+    <label>What to extract
+      <input id="exWhat" type="text" placeholder="e.g. every product with its price and rating" autocomplete="off">
+    </label>
+    <label>Fields <span class="hint">optional, comma separated</span>
+      <input id="exFields" type="text" placeholder="name, price, rating" autocomplete="off">
+    </label>
+    <div class="row">
+      <button class="btn primary" id="exRun" data-needs="ready">Extract</button>
+      <span class="hint" id="exHint"></span>
+    </div>
+    <div class="tables" id="tables"></div>
+  </section>
+
+  <main class="feed" id="feed" aria-live="polite">
+    <div class="empty" id="empty">
+      <p>Ask anything about this page, or use the buttons above.</p>
+      <p class="hint">Runs on the model loaded in CIU. Page text never leaves your machine.</p>
+    </div>
+  </main>
+
+  <footer class="composer">
+    <div class="progress" id="progress" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="progressText">Working</span>
+      <button class="btn small danger" id="stop">Stop</button>
+    </div>
+    <form id="askForm">
+      <textarea id="question" rows="2" placeholder="Ask about this page" aria-label="Ask about this page"></textarea>
+      <button class="btn primary" id="send" type="submit" data-needs="ready" aria-label="Send">Ask</button>
+    </form>
+  </footer>
+
+  <script src="sidepanel.js" type="module"></script>
+</body>
+</html>
