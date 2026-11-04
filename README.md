@@ -39,7 +39,7 @@ Every answer ends with a coverage line: **FULL** (whole page read), **PARTIAL** 
 
 ## Build from source
 
-You need Node 20+ and a running CIU.
+You need Node 22.22 or newer (see `.nvmrc`) and a running CIU.
 
     npm install
     npm run build

@@ -11,12 +11,17 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      # The Node version lives in .nvmrc (and package.json "engines"), so the
+      # workflow always matches what the test tools require.
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
+
+      - name: Check Node meets package.json engines
+        run: node -e 'const r=require("./package.json").engines.node.replace(">=","").split(".").map(Number);const v=process.versions.node.split(".").map(Number);for(let i=0;i<3;i++){if(v[i]>r[i])process.exit(0);if(v[i]<r[i]){console.error("Node "+process.versions.node+" is older than "+r.join("."));process.exit(1)}}'
 
       - name: Check the tag matches the version
         run: |
