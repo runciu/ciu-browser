@@ -2,6 +2,8 @@
 //   release/ciu-browser.zip           stable name, for the "latest" download link
 //   release/ciu-browser-<version>.zip versioned copy, for people who need an exact build
 // Both unpack to a single ciu-browser/ folder, ready for "Load unpacked".
+//   release/ciu-browser-webstore.zip  for the Chrome Web Store, which needs
+//                                     manifest.json at the top of the zip
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, rmSync, copyFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -22,5 +24,6 @@ copyFileSync(join(root, "LICENSE"), join(stage, "ciu-browser", "LICENSE"));
 
 execFileSync("zip", ["-qrX", join(out, "ciu-browser.zip"), "ciu-browser"], { cwd: stage });
 copyFileSync(join(out, "ciu-browser.zip"), join(out, `ciu-browser-${version}.zip`));
+execFileSync("zip", ["-qrX", join(out, "ciu-browser-webstore.zip"), "."], { cwd: join(stage, "ciu-browser") });
 rmSync(stage, { recursive: true, force: true });
-console.log(`release/ciu-browser.zip and release/ciu-browser-${version}.zip (v${version})`);
+console.log(`release/ciu-browser.zip, release/ciu-browser-${version}.zip and release/ciu-browser-webstore.zip (v${version})`);

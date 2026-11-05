@@ -14,6 +14,9 @@ let state = process.env.MOCK_STATE ?? "ready";
 const N_CTX = Number(process.env.MOCK_CTX ?? 4096);
 const DELAY = Number(process.env.MOCK_DELAY ?? 15);
 const requests = [];
+// Mirrors CIU's extension allowlist. Unset means any extension, for convenience;
+// POST /mock/allow?origins=a,b sets it, POST /mock/allow?origins=any clears it.
+let extAllow = process.env.MOCK_EXTENSION_ORIGINS ? process.env.MOCK_EXTENSION_ORIGINS.split(",") : null;
 
 const status = () => ({
   hardware: { backend: "metal", total_gib: 8, free_gib: 2.1 },
@@ -36,7 +39,9 @@ function guard(req) {
   const host = (req.headers.host ?? "").replace(/:\d+$/, "");
   if (!["127.0.0.1", "localhost", "[::1]"].includes(host)) return "host";
   const o = req.headers.origin;
-  if (o && !/^(chrome|moz|safari-web)-extension:\/\//.test(o) && o !== `http://127.0.0.1:${PORT}`) return "origin";
+  if (!o || o === `http://127.0.0.1:${PORT}`) return null;
+  const isExt = /^(chrome|moz|safari-web)-extension:\/\//.test(o);
+  if (!isExt || (extAllow && !extAllow.includes(o))) return "origin";
   return null;
 }
 
@@ -74,6 +79,12 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && req.url === "/api/status") return json(res, 200, status());
   if (req.method === "GET" && req.url === "/mock/requests") return json(res, 200, requests);
+  if (req.method === "POST" && req.url?.startsWith("/mock/allow")) {
+    const v = new URL(req.url, "http://x").searchParams.get("origins") ?? "any";
+    extAllow = v === "any" ? null : v.split(",");
+    return json(res, 200, { extAllow });
+  }
+  if (req.method === "POST" && req.url === "/api/status") return json(res, 405, { detail: "Method Not Allowed" });
   if (req.method === "POST" && req.url?.startsWith("/mock/state/")) {
     state = req.url.split("/").pop();
     return json(res, 200, { state });

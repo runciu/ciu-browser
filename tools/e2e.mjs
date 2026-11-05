@@ -223,6 +223,21 @@ try {
   await p4.waitForSelector('#conn[data-state="ready"]', { timeout: 8000 });
   check("recovers when a model is loaded", !(await p4.isDisabled("#summarise")));
 
+  // 11b. CIU running but refusing this extension's ID (the allowlist case).
+  // GET /api/status passes the guard, so the panel must probe with a POST,
+  // show "Blocked by CIU" with the exact fix, and disable the actions.
+  await fetch("http://127.0.0.1:8674/mock/allow?origins=chrome-extension://someotherid", { method: "POST" });
+  await p4.reload();
+  await p4.waitForSelector('#conn[data-state="forbidden"]', { timeout: 8000 });
+  const notice = await p4.textContent("#notice");
+  check("refused extension: shown as blocked, not connected", (await p4.textContent("#model")) === "Blocked by CIU" && (await p4.isDisabled("#summarise")));
+  check("refused extension: gives its own ID and the exact command", notice.includes(`CIU_EXTENSION_ORIGINS=chrome-extension://${extId} python3 run.py`), notice.slice(0, 120));
+  await p4.screenshot({ path: join(shots, "8-blocked.png") });
+  await fetch(`http://127.0.0.1:8674/mock/allow?origins=chrome-extension://${extId}`, { method: "POST" });
+  await p4.waitForSelector('#conn[data-state="ready"]', { timeout: 8000 });
+  check("allowed by exact ID: connects again", !(await p4.isDisabled("#summarise")));
+  await fetch("http://127.0.0.1:8674/mock/allow?origins=any", { method: "POST" });
+
   // 12. An ordinary https site the extension has no access to. Chrome hides
   // the URL and title; the panel must ask for access, not call it unreadable.
   // (The fixtures above are on 127.0.0.1, which the extension always has.)

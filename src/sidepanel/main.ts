@@ -35,12 +35,32 @@ async function refreshStatus(): Promise<CiuStatus> {
     status.state === "ready" ? `${status.model ?? "Model"}${ctx}` :
     status.state === "loading" ? "Loading model" :
     status.state === "no-model" ? "No model loaded" :
+    status.state === "forbidden" ? "Blocked by CIU" :
     status.state === "error" ? "Error" : "Not connected";
   conn.title = `${status.message} (${settings.endpoint}, ${status.latencyMs} ms)`;
 
   const n = $("notice");
   if (status.state === "ready") {
     n.hidden = true;
+  } else if (status.state === "forbidden" && status.fix) {
+    // CIU's guard refuses this extension's ID. Say which ID, and give the
+    // exact command, since the ID differs per install until it is pinned.
+    n.hidden = false;
+    const cmd = document.createElement("code");
+    cmd.className = "fix";
+    cmd.textContent = status.fix;
+    const copy = document.createElement("button");
+    copy.className = "btn small";
+    copy.type = "button";
+    copy.textContent = "Copy command";
+    copy.onclick = async () => {
+      await navigator.clipboard.writeText(status.fix ?? "");
+      copy.textContent = "Copied";
+    };
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "Run it in your CIU folder (or use `ciu` instead of `python3 run.py` if you installed CIU with the installer).";
+    n.replaceChildren(status.message + " ", document.createElement("br"), cmd, " ", copy, p);
   } else {
     n.hidden = false;
     n.replaceChildren(status.message + " ");

@@ -2,7 +2,7 @@ CIU Browser is a Chromium extension that lets the model already running in CIU r
 
 **Download:** `ciu-browser.zip` below. Unzip it, open `chrome://extensions`, switch on Developer mode, click **Load unpacked** and choose the `ciu-browser` folder. You need [CIU](https://github.com/runciu/ciu) running with a model loaded.
 
-What's in this first beta:
+What's in this beta:
 
 - Summarise a page, with a line under every answer saying how much of the page was read
 - Ask questions about the page, with follow-ups; answers stay on the page, and a separate button answers from general knowledge
@@ -11,7 +11,8 @@ What's in this first beta:
 - Export to CSV (opens correctly in Excel), JSON or Markdown
 - Stop any answer partway through; local per-page history you can delete
 - Reads a page only when you press a button, and only after you give it access to that page or site
+- Works with CIU's extension allowlist: if CIU is refusing this extension, the panel says so and gives the exact command to allow it
 
 Known limits: PDFs, iframes and canvas text aren't read yet. Long pages are read in sections, which takes longer on small machines. Chromium browsers only for now.
 
-For a CIU instance that websites can't control, update CIU to a version with the request guard (see the README).
+Needs a current CIU, which refuses requests from websites and unlisted extensions. Until the extension is published with a fixed ID, start CIU with this extension's ID allowed; the panel shows the command.

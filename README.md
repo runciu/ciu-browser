@@ -37,6 +37,20 @@ CIU Browser is an early beta, installed outside the Chrome Web Store for now. It
 
 Every answer ends with a coverage line: **FULL** (whole page read), **PARTIAL** (which sections, and how to read more), or **EXACT** (copied from a page table, no model involved).
 
+## If CIU says it is blocking the extension
+
+CIU only accepts requests from browser extensions on its allowlist, so that other extensions and websites cannot use your model. The allowlist names extensions by ID. If you load this extension unpacked, Chrome gives it an ID derived from your folder path, which CIU will not recognise, and the panel shows **Blocked by CIU**.
+
+The panel shows the exact command to fix it, with a copy button. It is CIU's start command with this extension's ID added. Read the ID from `chrome://extensions` and start CIU with:
+
+    CIU_EXTENSION_ORIGINS=chrome-extension://<your-id> ciu
+
+or, from a CIU source checkout:
+
+    CIU_EXTENSION_ORIGINS=chrome-extension://<your-id> python3 run.py
+
+Once the extension is published with a fixed ID, CIU will allow that ID by default and this step goes away.
+
 ## Build from source
 
 You need Node 22.22 or newer (see `.nvmrc`) and a running CIU.
@@ -50,12 +64,7 @@ Then in Chrome, Edge or Brave: open `chrome://extensions`, turn on Developer mod
 
 ### The CIU side
 
-CIU needs the request guard in `core-patch/0001-ciu-request-guard.patch` (see Security). Apply it in the CIU repo:
-
-    cd ciu && git apply ../ciu-browser/core-patch/0001-ciu-request-guard.patch
-    python -m pytest tests/test_guard.py
-
-The extension works with an unpatched CIU, but without the guard any website can drive CIU.
+Use a current CIU: it includes the request guard (see Security). An unpacked build has a folder-derived ID, so start CIU with that ID allowed, as described in [If CIU says it is blocking the extension](#if-ciu-says-it-is-blocking-the-extension).
 
 ## Releasing
 
@@ -84,7 +93,7 @@ All inference runs in the side panel rather than the service worker: an MV3 work
 * **Prompt injection.** Page text, titles and URLs only ever appear inside a fence whose boundary is random per request and stripped from the content, under a system prompt that says page text is data. Elements hidden from the reader (`display:none`, `visibility:hidden`, zero opacity) are dropped before the model sees anything. Model output is rendered with `textContent` only, and links are never made clickable.
 * **Sensitive fields.** Inputs, textareas, selects and password fields are never read.
 * **CSV export** prefixes cells starting with `=`, `+`, `-` or `@` so scraped text cannot run as a spreadsheet formula.
-* **CIU request guard** (the core patch). Without it, any site you visit can POST to `127.0.0.1:8674`: unload the model, or burn the GPU with a `text/plain` chat request, and with DNS rebinding even read responses. The guard rejects any Host header that is not loopback (defeats rebinding) and any browser Origin that is not CIU's own page or a browser extension. Requests with no Origin, such as curl and the Blender and Godot addons, are unaffected. `CIU_ALLOWED_ORIGINS` adds local web apps on purpose.
+* **CIU request guard** (now part of CIU). Without it, any site you visit can POST to `127.0.0.1:8674`: unload the model, or burn the GPU with a `text/plain` chat request, and with DNS rebinding even read responses. The guard rejects any Host header that is not loopback (defeats rebinding) and any browser Origin that is not CIU's own page or an extension on CIU's allowlist (by exact ID, so other installed extensions cannot use your model). The panel detects when CIU is refusing this extension and shows the fix. Requests with no Origin, such as curl and the Blender and Godot addons, are unaffected. `CIU_ALLOWED_ORIGINS` adds local web apps on purpose.
 
 ## Testing
 
@@ -122,7 +131,6 @@ Runs the extension's own task code on fixture pages in `eval/fixtures` (news art
     src/lib/           CIU client, budgeting, prompts, tasks, schema, export, history, settings
     eval/              fixtures, suite and runner
     tools/             mock CIU, e2e and real-CIU checks
-    core-patch/        request guard for CIU core
 
 ## Licence
 

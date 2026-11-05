@@ -149,3 +149,29 @@ describe("system prompt", () => {
     expect(msgs[0].content).toMatch(/Today's date is \w+day, \d{1,2} \w+ \d{4}\./);
   });
 });
+
+import { getStatus } from "../src/lib/ciu";
+
+describe("guard probe", () => {
+  const status = { runner: { state: "ready", model_path: "/m/q.gguf", n_ctx: 4096 }, models: [] };
+  const fakeFetch = (postCode: number) =>
+    (async (_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Response(JSON.stringify({ error: { type: "ciu_forbidden_origin" } }), { status: postCode })
+        : new Response(JSON.stringify(status), { status: 200 })) as unknown as typeof fetch;
+  it("reports ready when CIU allows this client (405 from the router)", async () => {
+    expect((await getStatus("http://127.0.0.1:8674", fakeFetch(405))).state).toBe("ready");
+  });
+  it("reports forbidden when the guard refuses it (403), even though GET status succeeded", async () => {
+    const s = await getStatus("http://127.0.0.1:8674", fakeFetch(403));
+    expect(s.state).toBe("forbidden");
+    expect(s.message).toMatch(/does not accept|refused/);
+  });
+  it("treats a failed probe as allowed, so it never hides a working CIU", async () => {
+    const f = (async (_u: string, init?: RequestInit) => {
+      if (init?.method === "POST") throw new Error("network");
+      return new Response(JSON.stringify(status), { status: 200 });
+    }) as unknown as typeof fetch;
+    expect((await getStatus("http://127.0.0.1:8674", f)).state).toBe("ready");
+  });
+});

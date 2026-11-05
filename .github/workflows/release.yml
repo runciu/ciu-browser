@@ -49,5 +49,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="${GITHUB_REF_NAME#v}"
-          gh release create "$GITHUB_REF_NAME" release/ciu-browser.zip "release/ciu-browser-$v.zip" \
+          gh release create "$GITHUB_REF_NAME" release/ciu-browser.zip "release/ciu-browser-$v.zip" release/ciu-browser-webstore.zip \
             --title "CIU Browser $v (beta)" --notes-file RELEASE_NOTES.md

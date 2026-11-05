@@ -2,7 +2,7 @@
 // CIU already has: GET /api/status for detection and model info, and the
 // OpenAI-compatible POST /v1/chat/completions for inference. No adapter.
 
-export type ConnState = "offline" | "no-model" | "loading" | "ready" | "error";
+export type ConnState = "offline" | "no-model" | "loading" | "ready" | "error" | "forbidden";
 
 export interface CiuStatus {
   state: ConnState;
@@ -14,6 +14,25 @@ export interface CiuStatus {
   latencyMs: number;
   /** Raw status payload, kept for the diagnostics view. */
   raw?: unknown;
+  /** Set when CIU refuses this extension: the command that would allow it. */
+  fix?: string;
+}
+
+/** This extension's own origin, as CIU sees it. Null outside an extension (tests, eval). */
+export function extensionOrigin(): string | null {
+  const id = (globalThis as any).chrome?.runtime?.id;
+  return typeof id === "string" && id ? `chrome-extension://${id}` : null;
+}
+
+/** The command that starts CIU with this extension allowed. */
+export function allowCommand(origin: string): string {
+  return `CIU_EXTENSION_ORIGINS=${origin} python3 run.py`;
+}
+
+function forbiddenMessage(origin: string | null): string {
+  return origin
+    ? `CIU is running, but it does not accept requests from this extension (${origin}). Restart CIU with this extension allowed.`
+    : "CIU is running, but it refused this client's requests. Check CIU_EXTENSION_ORIGINS and CIU_ALLOWED_ORIGINS.";
 }
 
 export interface ChatMessage {
@@ -49,6 +68,7 @@ export class CiuError extends Error {
       | "context-full"
       | "bad-response"
       | "aborted"
+      | "forbidden"
       | "http",
     public detail?: unknown,
   ) {
@@ -70,7 +90,23 @@ export async function getStatus(endpoint: string, fetchImpl: typeof fetch = fetc
       return { state: "error", model: null, nCtx: null, latencyMs, message: `CIU answered HTTP ${res.status}.` };
     }
     const raw = await res.json();
-    return { ...parseStatus(raw), latencyMs, raw };
+    const parsed = { ...parseStatus(raw), latencyMs, raw };
+    // GET /api/status carries no Origin, so it passes CIU's request guard even
+    // when this extension is not on CIU's allowlist; every later POST would
+    // then fail with 403 while the panel says "Connected". A POST carries the
+    // Origin, so probe with one. The guard runs before routing: it answers
+    // 403 when this origin is refused, and CIU's router answers 405 (wrong
+    // method) when it is allowed. Nothing is executed either way.
+    if (await refusedByGuard(endpoint, fetchImpl, ctl.signal)) {
+      const origin = extensionOrigin();
+      return {
+        ...parsed,
+        state: "forbidden",
+        message: forbiddenMessage(origin),
+        fix: origin ? allowCommand(origin) : undefined,
+      };
+    }
+    return parsed;
   } catch (e) {
     const latencyMs = Date.now() - t0;
     const timedOut = ctl.signal.aborted;
@@ -85,6 +121,16 @@ export async function getStatus(endpoint: string, fetchImpl: typeof fetch = fetc
     };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function refusedByGuard(endpoint: string, fetchImpl: typeof fetch, signal: AbortSignal): Promise<boolean> {
+  try {
+    const r = await fetchImpl(`${endpoint}/api/status`, { method: "POST", signal, cache: "no-store" });
+    // Any 403 here is the guard: no CIU route answers 403 to this POST.
+    return r.status === 403;
+  } catch {
+    return false; // the probe is advisory; a failure here must not hide a working CIU
   }
 }
 
@@ -208,9 +254,10 @@ async function errorFromResponse(res: Response): Promise<CiuError> {
     return new CiuError(msg, "context-full", payload);
   }
   if (res.status === 403) {
+    const origin = extensionOrigin();
     return new CiuError(
-      "CIU refused the request from the extension. Update CIU, or check its allowed origins.",
-      "http",
+      forbiddenMessage(origin) + (origin ? ` Start CIU with: ${allowCommand(origin)}` : ""),
+      "forbidden",
       payload,
     );
   }

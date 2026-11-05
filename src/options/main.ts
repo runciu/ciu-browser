@@ -39,7 +39,7 @@ async function test() {
   r.textContent =
     st.state === "ready"
       ? `Connected in ${st.latencyMs} ms. Model: ${st.model ?? "unknown"}, context ${st.nCtx ?? "unknown"} tokens.`
-      : st.message;
+      : st.message + (st.fix ? ` Start CIU with: ${st.fix}` : "");
   const diag = {
     extension: chrome.runtime.getManifest().version,
     endpoint: ep,
