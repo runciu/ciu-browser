@@ -1,6 +1,6 @@
 {
   "name": "ciu-browser",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "CIU Browser: a browser extension that uses the local CIU model",
   "scripts": {
     "build": "node build.mjs",

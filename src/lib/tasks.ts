@@ -16,8 +16,8 @@ import * as P from "./prompts";
 import {
   extractionSchema,
   mergeDatasets,
-  parseJsonLoose,
-  toDataset,
+  readRows,
+  rowsToDataset,
   validate,
   type Dataset,
 } from "./schema";
@@ -31,6 +31,8 @@ export interface TaskCtx {
   signal?: AbortSignal;
   onToken?: (t: string) => void;
   onProgress?: (msg: string) => void;
+  /** Model extraction: the rows found so far, after each model call. */
+  onPartial?: (d: Dataset) => void;
   /** Injectable for tests and the eval runner. */
   chatImpl?: typeof chat;
 }
@@ -420,78 +422,156 @@ export function matchTable(tables: TableLike[], what: string, fields: string[], 
   return size(tables[biggest]) >= 5 && (!pageChars || chars >= pageChars * 0.3) ? { index: biggest, unmatched: [] } : null;
 }
 
+/**
+ * Split off the start of `text` that fits in `maxTokens`, cutting at a
+ * paragraph break, else a sentence end, else mid-text. Verbatim: head + rest
+ * is exactly `text`, so a cursor over the page never skips or repeats text.
+ */
+export function takeHead(text: string, maxTokens: number): [string, string] {
+  if (estimateTokens(text) <= maxTokens) return [text, ""];
+  let cut = -1;
+  for (const re of [/\n\s*\n/g, /[.!?。！？]\s+/g]) {
+    for (const m of text.matchAll(re)) {
+      const end = m.index! + m[0].length;
+      if (estimateTokens(text.slice(0, end)) > maxTokens) break;
+      cut = end;
+    }
+    if (cut > 0) break;
+  }
+  if (cut <= 0) {
+    cut = Math.max(1, maxTokens * 3);
+    while (cut > 1 && estimateTokens(text.slice(0, cut)) > maxTokens) cut = Math.floor(cut * 0.85);
+  }
+  return [text.slice(0, cut), text.slice(cut)];
+}
+
+/**
+ * Where in `text` the last of `rows` came from, so reading can resume after
+ * it. Rows are in page order, so each row's first usable value is searched
+ * for after the previous row's. Returns the end of the paragraph holding the
+ * last row, or -1 when it cannot be placed (values reworded, say).
+ */
+export function resumePoint(text: string, rows: unknown[][]): number {
+  const hay = text.toLowerCase();
+  let pos = 0;
+  let found = false;
+  for (const r of rows) {
+    const key = r.find((v) => typeof v === "string" && v.trim().length >= 3) as string | undefined;
+    if (!key) continue;
+    const at = hay.indexOf(key.trim().toLowerCase(), pos);
+    if (at === -1) {
+      found = false;
+      continue;
+    }
+    pos = at + key.trim().length;
+    found = true;
+  }
+  if (!found) return -1;
+  const br = text.slice(pos).search(/\n\s*\n/);
+  return br === -1 ? text.length : pos + br;
+}
+
 export async function extract(ctx: TaskCtx, page: PageInput, req: ExtractRequest): Promise<DataOutput> {
   const s = ctx.settings;
-  // JSON is verbose; give extraction a larger share of the window for output.
-  const outWant = Math.max(outputTokens(s), 1024);
-  const base = makeBudget(ctx.nCtx, outWant, P.SYSTEM_BASE + page.title + page.url + req.what + req.fields.join(",") + "Extract: Return fields records You output JSON only".repeat(2));
+  // A row answer can be as long as the text it comes from, so give
+  // extraction the largest output share the context allows (a third).
+  const b = makeBudget(
+    ctx.nCtx,
+    Math.max(outputTokens(s), 1536),
+    P.SYSTEM_BASE + page.title + page.url + req.what + req.fields.join(",") + "Extract: Columns, in this order Return rows one row per item List the items in the order they appear".repeat(2),
+  );
   const issues: string[] = [];
+  const text = page.text;
+  let cursor = 0;
+  let fields = req.fields;
+  let rows: unknown[][] = [];
+  let calls = 0;
+  let cutOff = 0;
+  let stopped = false;
+  // Answer tokens per (estimated) page token, measured as we go and kept at
+  // the highest seen. Starts at the old 1:3 guess; dense pages raise it after
+  // the first call, and every later section is sized so its answer fits.
+  let density = 1 / 3;
+  let inputCap = b.input;
 
-  return withShrinkingBudget(base, async (b) => {
-    // Output must fit as well as input: a chunk that yields more records than
-    // fit in maxOutput gets cut mid-JSON. Cap input per call at a multiple of
-    // output so the two stay in proportion.
-    const perCall = Math.max(200, Math.min(b.input, b.maxOutput * 3));
-    const all = chunkText(page.text, perCall);
-    const queue = all.slice(0, s.maxSections).map((c) => ({ text: c.text, depth: 0 }));
-    const parts: Dataset[] = [];
-    let fields = req.fields;
-    let calls = 0;
-    const maxCalls = s.maxSections + 6; // room for a few splits
-    let dropped = 0;
+  const snapshot = (): Dataset => mergeDatasets([rowsToDataset(rows, fields)], fields);
+  const pct = () => Math.round((cursor / Math.max(1, text.length)) * 100);
 
-    while (queue.length) {
-      const job = queue.shift()!;
-      if (calls >= maxCalls) {
-        dropped++;
+  while (cursor < text.length) {
+    if (calls >= s.maxSections) break;
+    if (ctx.signal?.aborted) {
+      stopped = true;
+      break;
+    }
+    const size = Math.max(150, Math.min(inputCap, Math.floor((0.85 * b.maxOutput) / density)));
+    const [head] = takeHead(text.slice(cursor), size);
+    calls++;
+    ctx.onProgress?.(`Extracting with the model: ${pct()}% of the page read, ${rows.length} rows so far (call ${calls})`);
+    const schema = extractionSchema(fields);
+    let res: ChatResult;
+    try {
+      res = await call(ctx, P.extractPrompt(page, head, req.what, fields), opts(ctx, b.maxOutput, false, { jsonSchema: schema, temperature: 0 }));
+    } catch (e) {
+      if (e instanceof CiuError && e.kind === "aborted") {
+        stopped = true;
+        break;
+      }
+      if (e instanceof CiuError && e.kind === "context-full") {
+        // The token estimate was low for this text: retry the same place smaller.
+        inputCap = Math.floor(inputCap * 0.6);
+        if (inputCap < 150) throw new CiuError("The page text is too dense for the loaded model's context. Reload the model in CIU with a larger context.", "context-full", e);
         continue;
       }
-      calls++;
-      ctx.onProgress?.(`Extracting with the model: call ${calls}, about ${calls + queue.length} in total`);
-      const schema = extractionSchema(fields);
-      const msgs = P.extractPrompt(page, job.text, req.what, fields);
-      const res = await call(ctx, msgs, opts(ctx, b.maxOutput, false, { jsonSchema: schema, temperature: 0 }));
-
-      // Ran out of output room: the JSON is cut. Split the input and redo both
-      // halves, rather than trying to salvage a broken document.
-      if (res.finishReason === "length") {
-        const halves = chunkText(job.text, Math.max(100, Math.floor(estimateTokens(job.text) / 2)));
-        if (halves.length > 1 && job.depth < 3) {
-          queue.unshift(...halves.map((h) => ({ text: h.text, depth: job.depth + 1 })));
-          continue;
-        }
-        issues.push("One section produced more output than fits; its results may be incomplete.");
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = parseJsonLoose(res.text);
-      } catch (e) {
-        issues.push(`Section skipped: ${(e as Error).message}`);
-        continue;
-      }
-      const problems = validate(schema, parsed);
-      if (problems.length) {
-        issues.push(`Model output did not match the schema (${problems.slice(0, 3).join("; ")}${problems.length > 3 ? "; ..." : ""}). Kept the records that could be read.`);
-      }
-      const ds = toDataset(parsed, fields);
-      // Lock auto-chosen fields after the first section that produced data,
-      // so every later section fills the same columns.
-      if (!fields.length && ds.fields.length) fields = ds.fields;
-      parts.push(ds);
+      throw e;
     }
 
-    const dataset = mergeDatasets(parts, fields);
-    const complete = all.length <= s.maxSections && dropped === 0 && !page.truncated;
-    const note = complete
-      ? all.length > 1
-        ? `Extracted from the whole page in ${all.length} sections. Model-extracted values: check before relying on them.`
-        : "Extracted from the whole page. Model-extracted values: check before relying on them."
-      : `Extracted from the first ${Math.min(all.length, s.maxSections)} of ${all.length} sections.` +
-        truncNote(page) +
-        (dropped ? ` ${dropped} split sections were skipped to bound the run time.` : "");
-    return { kind: "data", dataset, coverage: { note, complete }, issues, source: "model" };
-  });
+    const got = readRows(res.text);
+    if (!fields.length && got.fields?.length) fields = got.fields; // lock auto-chosen columns
+    const usable = fields.length ? got.rows : [];
+    const outTokens = res.completionTokens ?? estimateTokens(res.text);
+    const truncated = res.finishReason === "length";
+
+    if (!truncated && !got.complete && !usable.length) {
+      // Finished but not JSON (a grammar-less backend, or a refusal): nothing to keep here.
+      issues.push("One section's answer was not valid data and was skipped.");
+      cursor += head.length;
+    } else if (!truncated) {
+      const problems = validate(schema, schema.required?.includes("fields") ? { fields, rows: usable } : { rows: usable });
+      if (problems.length) issues.push(`Some rows did not match the columns (${problems.slice(0, 2).join("; ")}). Kept what could be read.`);
+      rows = rows.concat(usable);
+      density = Math.max(density, outTokens / Math.max(1, estimateTokens(head)));
+      cursor += head.length;
+    } else {
+      cutOff++;
+      // Keep every finished row, then resume after the last one in the text.
+      const end = usable.length ? resumePoint(head, usable) : -1;
+      if (end > 0) {
+        rows = rows.concat(usable);
+        density = Math.max(density, outTokens / Math.max(1, estimateTokens(head.slice(0, end))));
+        cursor += end;
+      } else {
+        // Nothing placeable: the section was far too big for one answer. Halve it and try again.
+        density = Math.max(density * 2, outTokens / Math.max(1, estimateTokens(head)) * 2);
+        if (size <= 150) {
+          issues.push("A passage produced more data than one answer can hold; it was skipped.");
+          cursor += head.length;
+        }
+      }
+    }
+    ctx.onPartial?.(snapshot());
+  }
+
+  const dataset = snapshot();
+  const done = cursor >= text.length;
+  const complete = done && !page.truncated && !stopped;
+  const read = done ? "the whole page" : `${pct()}% of the page`;
+  let note: string;
+  if (stopped) note = `Stopped after reading ${read}. The rows found so far are below.`;
+  else if (!done) note = `Read ${read} in ${calls} model calls, the limit per task. Raise "Sections per task" in settings to read more.`;
+  else note = calls > 1 ? `Read the whole page in ${calls} model calls.` : "Read the whole page.";
+  note += truncNote(page) + " Values were written by the model: check them before relying on them.";
+  if (cutOff) note += ` ${cutOff} answer${cutOff === 1 ? " was" : "s were"} cut off at the output limit; their finished rows were kept and reading resumed after them.`;
+  return { kind: "data", dataset, coverage: { note, complete }, issues, source: "model" };
 }
 
 /**

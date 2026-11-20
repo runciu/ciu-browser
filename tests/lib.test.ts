@@ -3,7 +3,7 @@ import { chunkText, estimateTokens, makeBudget, selectRelevant } from "../src/li
 import { parseStatus, sseEvents } from "../src/lib/ciu";
 import { tableToDataset, toCsv, toCsvFile, toMarkdownTable } from "../src/lib/export";
 import { fence } from "../src/lib/prompts";
-import { extractionSchema, mergeDatasets, parseFieldList, parseJsonLoose, toDataset, validate } from "../src/lib/schema";
+import { extractionSchema, mergeDatasets, parseFieldList, parseJsonLoose, readRows, rowsToDataset, toDataset, validate } from "../src/lib/schema";
 import { normaliseEndpoint } from "../src/lib/settings";
 import { prune, pageKey } from "../src/lib/history";
 
@@ -87,15 +87,26 @@ describe("schema", () => {
     expect(parseFieldList("Name, Unit Price ($); name\nrating")).toEqual(["name", "unit_price", "rating"]);
     for (const all of ["all fields", "All", "everything", "*", "all columns"]) expect(parseFieldList(all), all).toEqual([]);
   });
-  it("validates the extraction schema", () => {
+  it("validates the row-based extraction schema", () => {
     const s = extractionSchema(["name", "price"]);
-    expect(validate(s, { fields: ["name", "price"], records: [{ name: "A", price: 3 }] })).toEqual([]);
-    expect(validate(s, { fields: [], records: [{ name: "A" }] })[0]).toMatch(/missing "price"/);
-    expect(validate(s, { fields: [], records: [{ name: "A", price: 1, x: 2 }] })[0]).toMatch(/unexpected/);
-    expect(validate(s, { records: "no" }).length).toBeGreaterThan(0);
+    expect(validate(s, { rows: [["A", 3], ["B", null]] })).toEqual([]);
+    expect(validate(s, { rows: [["A"]] })[0]).toMatch(/fewer than 2/);
+    expect(validate(s, { rows: [["A", 1, 2]] })[0]).toMatch(/more than 2/);
+    expect(validate(s, { rows: [["A", { nested: 1 }]] }).length).toBe(1);
+    expect(validate(s, { rows: "no" }).length).toBeGreaterThan(0);
     const auto = extractionSchema([]);
-    expect(validate(auto, { fields: ["a"], records: [{ a: "1", b: null }] })).toEqual([]);
-    expect(validate(auto, { fields: ["a"], records: [{ a: { nested: 1 } }] }).length).toBe(1);
+    expect(validate(auto, { fields: ["a", "b"], rows: [["1", null]] })).toEqual([]);
+    expect(validate(auto, { rows: [] })[0]).toMatch(/missing "fields"/);
+  });
+  it("reads every finished row from an answer cut off mid-row", () => {
+    expect(readRows('{"rows":[["A, Inc.","x"],["B \\"q\\" ]","y"],["C","z')).toEqual({ fields: null, rows: [["A, Inc.", "x"], ['B "q" ]', "y"]], complete: false });
+    expect(readRows('{"fields":["a","b"],"rows":[["1",2],')).toMatchObject({ fields: ["a", "b"], rows: [["1", 2]], complete: false });
+    expect(readRows('{"fields":["a","b"],"rows":[["1",2]]}')).toMatchObject({ rows: [["1", 2]], complete: true });
+    expect(readRows("not json")).toEqual({ fields: null, rows: [], complete: false });
+  });
+  it("maps rows to records by column order", () => {
+    expect(rowsToDataset([["A", 1], ["B"]], ["n", "v"]).records).toEqual([{ n: "A", v: 1 }, { n: "B", v: null }]);
+    expect(rowsToDataset([{ n: "C", v: 3 }], ["n", "v"]).records).toEqual([{ n: "C", v: 3 }]);
   });
   it("recovers JSON wrapped in prose or fences", () => {
     expect(parseJsonLoose('Sure!\n```json\n{"a":1}\n```')).toEqual({ a: 1 });

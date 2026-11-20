@@ -45,19 +45,22 @@ function guard(req) {
   return null;
 }
 
-/** Fake but schema-shaped extraction: pull "name ... £price" lines out of the prompt. */
+/**
+ * Fake but schema-shaped extraction, in CIU Browser's row format: pull
+ * "| name | £price |" lines out of the prompt as rows. Fixed columns come from
+ * the schema's row length; auto mode answers with its own column names.
+ */
 function fakeExtraction(body) {
-  const schema = body.response_format?.json_schema?.schema;
-  const fields = schema?.properties?.records?.items?.required ?? ["name", "price"];
+  const props = body.response_format?.json_schema?.schema?.properties ?? {};
+  const width = props.rows?.items?.minItems ?? 2;
+  const auto = !!props.fields;
   const page = body.messages.map((m) => m.content).join("\n");
-  const records = [];
+  const rows = [];
   for (const m of page.matchAll(/\|\s*([^|\n]+?)\s*\|\s*([£$€]?\d[\d.,]*)\s*\|/g)) {
     if (/^-+$/.test(m[1])) continue;
-    const r = {};
-    fields.forEach((f, i) => (r[f] = i === 0 ? m[1] : i === 1 ? m[2] : null));
-    records.push(r);
+    rows.push(Array.from({ length: auto ? 2 : width }, (_, i) => (i === 0 ? m[1] : i === 1 ? m[2] : null)));
   }
-  return JSON.stringify({ fields, records });
+  return JSON.stringify(auto ? { fields: ["name", "price"], rows } : { rows });
 }
 
 function reply(body) {

@@ -166,22 +166,22 @@ export function rewritePrompt(selection: string, style: RewriteStyle, tag = rand
 }
 
 export function extractPrompt(p: PageRef, text: string, what: string, fields: string[], tag = randomTag()): ChatMessage[] {
-  const fieldLine = fields.length
-    ? `Use exactly these fields for every record: ${fields.join(", ")}.`
-    : `Choose a small set of clear field names (snake_case) that fit the data, list them in "fields", and use the same fields for every record.`;
+  const shape = fields.length
+    ? `Columns, in this order: ${fields.join(", ")}.\nReturn {"rows": [[...], ...]}: one row per item, each row a list of exactly ${fields.length} values in the column order above.`
+    : `Choose a small set of clear column names (snake_case) that fit the data.\nReturn {"fields": [...], "rows": [[...], ...]}: the column names first, then one row per item, each row a list of values in the column order.`;
   return [
     {
       role: "system",
       content:
         systemBase() +
-        `\n- You output JSON only. Copy values exactly as they appear in the page. Use null when a value is missing. Never invent records.`,
+        `\n- You output JSON only. Copy values exactly as they appear in the page. Use null when a value is missing. Never invent items.`,
     },
     {
       role: "user",
       content:
         `${fence("PAGE", pageHeader(p) + text, tag)}\n\n` +
-        `Extract: ${what || "the main repeated items or facts on the page"}.\n${fieldLine}\n` +
-        `Return {"fields": [...], "records": [...]}. If nothing matches, return an empty records list.`,
+        `Extract: ${what || "the main repeated items or facts on the page"}.\n${shape}\n` +
+        `List the items in the order they appear in the text. If nothing matches, return an empty rows list.`,
     },
   ];
 }

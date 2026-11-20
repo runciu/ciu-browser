@@ -89,40 +89,112 @@ describe("ask", () => {
   });
 });
 
+// A dense, TechCrunch-shaped article: month headings and one paragraph per
+// company, each carrying all six requested facts.
+const MONTHS = ["December", "November", "October", "September", "August", "July", "June", "May", "April", "March", "February", "January"];
+function fundingArticle(n: number): string {
+  let t = "Last year was a record year for AI funding. ".repeat(20) + "\n\n";
+  for (let i = 1; i <= n; i++) {
+    if (i % 5 === 1) t += `## ${MONTHS[Math.floor(i / 5) % 12]}\n\n`;
+    t += `- **Startup${String(i).padStart(2, "0")}**, which builds AI agents for finance teams, raised a $${100 + i} million Series B round announced on December ${(i % 28) + 1}. The round was led by Fund${i} Ventures, valuing the company at $${i}.2 billion.\n\n`;
+  }
+  return t;
+}
+const FIELDS = ["company", "industry", "funding_raised", "valuation", "funding_round", "lead_investor"];
+
+/**
+ * A fake model that behaves like a real one on dense pages: it writes one row
+ * per company in the text it is given, in page order, and is cut off once its
+ * answer reaches max_tokens (about 3.5 characters per token).
+ */
+function denseModel(opts: { pretty?: boolean } = {}) {
+  return fake((msgs, o) => {
+    const page = msgs[1].content;
+    const rows = Array.from(page.matchAll(/\*\*(Startup\d+)\*\*, which builds (.+?), raised a (\$\d+ million) (Series \w) round.+?led by (.+?), valuing the company at (\$[\d.]+ billion)/g), (m) => [m[1], m[2], m[3], m[6], m[4], m[5]]);
+    const full = opts.pretty ? JSON.stringify({ rows }, null, 2) : JSON.stringify({ rows });
+    const limit = Math.floor(o.maxTokens * 3.5);
+    return full.length > limit ? { text: full.slice(0, limit), finish: "length" } : { text: full };
+  });
+}
+
 describe("extract", () => {
-  it("locks auto-chosen fields after the first section", async () => {
+  it("asks for compact rows in page order, at temperature 0", async () => {
+    const f = fake(() => ({ text: '{"rows":[]}' }));
+    await T.extract(ctx(f.chatImpl), page(1000), { what: "", fields: ["a", "b"] });
+    const schema = f.calls[0].o.jsonSchema as any;
+    expect(schema.properties.rows.items).toMatchObject({ type: "array", minItems: 2, maxItems: 2 });
+    expect(schema.properties.records).toBeUndefined();
+    expect(f.calls[0].msgs[1].content).toMatch(/in the order they appear/);
+    expect(f.calls[0].o.temperature).toBe(0);
+  });
+
+  it("dense page: every company exactly once, in order, with no wasted calls", async () => {
+    for (const pretty of [false, true]) {
+      const f = denseModel({ pretty });
+      const out = await T.extract(ctx(f.chatImpl, 4096, { maxSections: 30 }), { title: "AI startups", url: "https://example.com", text: fundingArticle(64) }, { what: "funding rounds", fields: FIELDS });
+      const names = out.dataset.records.map((r) => r.company);
+      expect(names, pretty ? "pretty" : "compact").toEqual(Array.from({ length: 64 }, (_, i) => `Startup${String(i + 1).padStart(2, "0")}`));
+      expect(out.dataset.records[0]).toEqual({ company: "Startup01", industry: "AI agents for finance teams", funding_raised: "$101 million", valuation: "$1.2 billion", funding_round: "Series B", lead_investor: "Fund1 Ventures" });
+      expect(out.coverage.complete).toBe(true);
+      // Every call adds rows: nothing is thrown away and redone.
+      expect(f.calls.length, `${f.calls.length} calls`).toBeLessThanOrEqual(pretty ? 9 : 6);
+    }
+  });
+
+  it("keeps the finished rows of a cut-off answer and resumes after the last one", async () => {
+    let n = 0;
+    const f = fake((msgs) => {
+      n++;
+      if (n === 1) return { text: '{"rows":[["Startup01","x"],["Startup02","y"],["Startu', finish: "length" };
+      const first = msgs[1].content.match(/\*\*(Startup\d+)/)?.[1];
+      return { text: JSON.stringify({ rows: [[first, "z"]] }) };
+    });
+    const out = await T.extract(ctx(f.chatImpl), { title: "t", url: "u", text: fundingArticle(3) }, { what: "", fields: ["company", "note"] });
+    expect(out.dataset.records.map((r) => r.company)).toEqual(["Startup01", "Startup02", "Startup03"]);
+    expect(out.coverage.note).toMatch(/1 answer was cut off/);
+  });
+
+  it("locks auto-chosen columns after the first answer", async () => {
     let n = 0;
     const f = fake((_m, o) => {
       n++;
-      const req = (o.jsonSchema as any).properties.records.items.required;
-      return { text: JSON.stringify({ fields: req ?? ["a", "b"], records: [{ a: `x${n}`, b: n }] }) };
+      const auto = !!(o.jsonSchema as any).properties.fields;
+      return { text: JSON.stringify(auto ? { fields: ["a", "b"], rows: [[`x${n}`, n]] } : { rows: [[`x${n}`, n]] }) };
     });
     const out = await T.extract(ctx(f.chatImpl, 4096, { maxSections: 3 }), page(30_000), { what: "", fields: [] });
-    expect((f.calls[0].o.jsonSchema as any).properties.records.items.required).toBeUndefined();
-    expect((f.calls[1].o.jsonSchema as any).properties.records.items.required).toEqual(["a", "b"]);
+    expect((f.calls[0].o.jsonSchema as any).properties.fields).toBeDefined();
+    expect((f.calls[1].o.jsonSchema as any).properties.fields).toBeUndefined();
     expect(out.dataset.fields).toEqual(["a", "b"]);
     expect(out.dataset.records.length).toBe(3);
-    expect(f.calls.every((c) => c.o.temperature === 0)).toBe(true);
   });
-  it("splits a section whose output ran out of room", async () => {
+
+  it("Stop returns the rows found so far instead of discarding them", async () => {
+    const ctl = new AbortController();
     let n = 0;
     const f = fake(() => {
       n++;
-      if (n === 1) return { text: '{"fields":["a"],"records":[{"a":"tru', finish: "length" };
-      return { text: JSON.stringify({ fields: ["a"], records: [{ a: `r${n}` }] }) };
+      if (n === 2) {
+        ctl.abort();
+        return new CiuError("Stopped.", "aborted");
+      }
+      return { text: JSON.stringify({ rows: [["kept", 1]] }) };
     });
-    const out = await T.extract(ctx(f.chatImpl), page(3000), { what: "", fields: ["a"] });
-    // The truncated call is redone as smaller pieces; its broken JSON is never used.
-    expect(f.calls.length).toBeGreaterThanOrEqual(3);
-    expect(out.dataset.records.map((r) => r.a)).toEqual(Array.from({ length: f.calls.length - 1 }, (_, i) => `r${i + 2}`));
-    expect(out.issues).toEqual([]);
+    const partials: number[] = [];
+    const c = { ...ctx(f.chatImpl, 4096, { maxSections: 10 }), signal: ctl.signal, onPartial: (d: any) => partials.push(d.records.length) };
+    const out = await T.extract(c, page(30_000), { what: "", fields: ["a", "b"] });
+    expect(out.dataset.records).toEqual([{ a: "kept", b: 1 }]);
+    expect(out.coverage.complete).toBe(false);
+    expect(out.coverage.note).toMatch(/^Stopped after reading \d+% of the page/);
+    expect(partials).toEqual([1]);
   });
+
   it("reports unreadable output instead of inventing data", async () => {
     const f = fake(() => ({ text: "I cannot do that" }));
     const out = await T.extract(ctx(f.chatImpl), page(1000), { what: "", fields: ["a"] });
     expect(out.dataset.records).toEqual([]);
-    expect(out.issues[0]).toMatch(/no JSON/);
+    expect(out.issues[0]).toMatch(/not valid data/);
   });
+
   it("copies page tables exactly", () => {
     const out = T.extractTable({ caption: "Prices", hasHeader: true, rows: [["Item", "Price"], ["Tea", "£2"]] });
     expect(out.dataset.records).toEqual([{ Item: "Tea", Price: "£2" }]);
@@ -174,5 +246,29 @@ describe("table routing", () => {
     expect(T.matchTable([pop], "each book with its price", [])).toBeNull();
     expect(T.matchTable([pop], "", ["title", "price", "availability"])).toBeNull();
     expect(T.matchTable([], "anything", [])).toBeNull();
+  });
+});
+
+describe("cursor helpers", () => {
+  it("takeHead cuts at paragraph breaks and never loses or repeats text", () => {
+    const t = fundingArticle(20);
+    let rest = t;
+    let joined = "";
+    let n = 0;
+    while (rest) {
+      const [h, r] = T.takeHead(rest, 300);
+      expect(h.length).toBeGreaterThan(0);
+      joined += h;
+      rest = r;
+      n++;
+    }
+    expect(joined).toBe(t);
+    expect(n).toBeGreaterThan(3);
+  });
+  it("resumePoint finds the paragraph after the last row, matching rows in page order", () => {
+    const t = "Intro mentions Startup02 early.\n\n- Startup01 raised.\n\n- Startup02 raised.\n\n- Startup03 raised.";
+    const end = T.resumePoint(t, [["Startup01"], ["Startup02"]]);
+    expect(t.slice(end).trim()).toBe("- Startup03 raised.");
+    expect(T.resumePoint(t, [["Nowhere Ltd"]])).toBe(-1);
   });
 });

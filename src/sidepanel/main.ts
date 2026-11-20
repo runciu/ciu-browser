@@ -309,6 +309,14 @@ function addBot() {
       if (!fromHistory || out.kind === "text") m.append(tools);
       scrollFeed();
     },
+    /** Model extraction in progress: show the rows found so far. */
+    partial(d: { fields: string[]; records: Record<string, unknown>[] }) {
+      const count = document.createElement("div");
+      count.className = "count";
+      count.textContent = `${d.records.length} row${d.records.length === 1 ? "" : "s"} so far…`;
+      body.replaceChildren(count, dataTable(d));
+      scrollFeed();
+    },
     fail(msg: string) {
       body.classList.remove("streaming");
       m.classList.add("error");
@@ -398,7 +406,8 @@ async function run(spec: RunSpec) {
         setProgress(`Generating · ${Math.round((Date.now() - started) / 1000)}s`);
         bot.token(t);
       },
-      onProgress: (msg) => setProgress(msg),
+      onProgress: (msg) => setProgress(`${msg} · ${Math.round((Date.now() - started) / 1000)}s`),
+      onPartial: (d) => bot.partial(d),
     });
     bot.done(out);
     if (spec.question) {

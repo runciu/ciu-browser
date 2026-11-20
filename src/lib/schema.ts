@@ -13,6 +13,7 @@ export type JsonSchema = {
   additionalProperties?: boolean | JsonSchema;
   items?: JsonSchema;
   maxItems?: number;
+  minItems?: number;
 };
 
 /** Turn user-typed field names into stable keys: "Unit Price ($)" -> "unit_price". */
@@ -42,24 +43,98 @@ export function parseFieldList(raw: string): string[] {
 
 const SCALAR: JsonSchema = { type: ["string", "number", "boolean", "null"] };
 
-export function extractionSchema(fields: string[], maxRecords = 200): JsonSchema {
-  const record: JsonSchema = fields.length
-    ? {
+/**
+ * Extraction answers are rows of values in field order, not objects. Objects
+ * repeat every field name in every record, which on a dense page made up
+ * about 40% of the answer, and the answer length is what limits how much of
+ * the page one model call can cover.
+ *
+ * Fixed fields: {"rows": [[v1, v2, ...], ...]}, each row exactly fields.length long.
+ * Auto fields:  {"fields": [...], "rows": [...]}; "fields" comes first, so the
+ *               model commits to its columns before writing rows.
+ */
+export function extractionSchema(fields: string[], maxRecords = 400): JsonSchema {
+  const row: JsonSchema = fields.length
+    ? { type: "array", items: SCALAR, minItems: fields.length, maxItems: fields.length }
+    : { type: "array", items: SCALAR, minItems: 1, maxItems: 20 };
+  const rows: JsonSchema = { type: "array", items: row, maxItems: maxRecords };
+  return fields.length
+    ? { type: "object", properties: { rows }, required: ["rows"], additionalProperties: false }
+    : {
         type: "object",
-        properties: Object.fromEntries(fields.map((f) => [f, { type: ["string", "number", "boolean", "null"] }])),
-        required: fields,
+        properties: { fields: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 20 }, rows },
+        required: ["fields", "rows"],
         additionalProperties: false,
+      };
+}
+
+/**
+ * Read what can be trusted from an extraction answer, even one cut off
+ * mid-way by the output limit: the "fields" list if it was finished, and
+ * every row that was closed. A half-written last row is left out.
+ */
+export function readRows(text: string): { fields: string[] | null; rows: unknown[][]; complete: boolean } {
+  try {
+    const v = parseJsonLoose(text) as any;
+    if (v && Array.isArray(v.rows)) {
+      return { fields: Array.isArray(v.fields) ? v.fields.map(String) : null, rows: v.rows.filter(Array.isArray), complete: true };
+    }
+  } catch {
+    /* cut off: fall through to the incremental reader */
+  }
+  const fields = (() => {
+    const m = text.match(/"fields"\s*:\s*(\[[^\]]*\])/);
+    if (!m) return null;
+    try {
+      return (JSON.parse(m[1]) as unknown[]).map(String);
+    } catch {
+      return null;
+    }
+  })();
+  const rows: unknown[][] = [];
+  const at = text.search(/"rows"\s*:\s*\[/);
+  if (at === -1) return { fields, rows, complete: false };
+  let i = text.indexOf("[", at) + 1;
+  // Scan the rows array, string-aware, and parse each row as soon as it closes.
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  for (; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "[") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "]") {
+      if (depth === 0) break; // end of the rows array
+      depth--;
+      if (depth === 0 && start !== -1) {
+        try {
+          const r = JSON.parse(text.slice(start, i + 1));
+          if (Array.isArray(r)) rows.push(r);
+        } catch {
+          /* malformed row: skip it */
+        }
+        start = -1;
       }
-    : { type: "object", additionalProperties: SCALAR };
-  return {
-    type: "object",
-    properties: {
-      fields: { type: "array", items: { type: "string" } },
-      records: { type: "array", items: record, maxItems: maxRecords },
-    },
-    required: ["fields", "records"],
-    additionalProperties: false,
-  };
+    }
+  }
+  return { fields, rows, complete: false };
+}
+
+/** Rows to records, by field order. Also accepts object records from grammar-less backends. */
+export function rowsToDataset(rows: unknown[], fields: string[]): Dataset {
+  const records = rows.map((r) =>
+    Object.fromEntries(
+      fields.map((f, i) => [f, normaliseCell(Array.isArray(r) ? r[i] : (r as Record<string, unknown> | null)?.[f])]),
+    ),
+  );
+  return { fields: [...fields], records };
 }
 
 function typeOf(v: unknown): string {
@@ -99,6 +174,8 @@ export function validate(schema: JsonSchema, value: unknown, path = "$"): string
     const arr = value as unknown[];
     if (schema.maxItems !== undefined && arr.length > schema.maxItems)
       errs.push(`${path}: more than ${schema.maxItems} items`);
+    if (schema.minItems !== undefined && arr.length < schema.minItems)
+      errs.push(`${path}: fewer than ${schema.minItems} items`);
     if (schema.items) arr.forEach((v, i) => errs.push(...validate(schema.items!, v, `${path}[${i}]`)));
   }
   return errs;

@@ -7,7 +7,7 @@ What's in this beta:
 - Summarise a page, with a line under every answer saying how much of the page was read
 - Ask questions about the page, with follow-ups; answers stay on the page, and a separate button answers from general knowledge
 - Explain, summarise, translate or rewrite selected text from the right-click menu
-- Extract data: page tables are copied exactly and instantly (merged cells, multi-row headers and footnote markers handled); other repeated content is extracted by the model against a strict schema
+- Extract data: page tables are copied exactly and instantly (merged cells, multi-row headers and footnote markers handled); plain text is turned into a table by the model, with rows appearing as they are found. Dense pages no longer get stuck: an answer cut off at the length limit keeps its finished rows and reading carries on after them, and Stop keeps everything found so far
 - Export to CSV (opens correctly in Excel), JSON or Markdown
 - Stop any answer partway through; local per-page history you can delete
 - Reads a page only when you press a button, and only after you give it access to that page or site

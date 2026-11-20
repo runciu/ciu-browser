@@ -166,7 +166,8 @@ try {
   await waitDone(p2);
   const reqs4 = await (await fetch("http://127.0.0.1:8674/mock/requests")).json();
   const rf = reqs4.at(-1).response_format;
-  check("model extraction sends a strict JSON schema", rf?.type === "json_schema" && rf.json_schema.schema.properties.records.items.required.join() === "plan,requests_per_minute");
+  const rowSchema = rf?.json_schema?.schema?.properties?.rows?.items;
+  check("model extraction asks for compact rows with a strict schema", rf?.type === "json_schema" && rowSchema?.minItems === 2 && rowSchema?.maxItems === 2 && /Columns, in this order: plan, requests_per_minute/.test(reqs4.at(-1).messages[1].content));
   check("model extraction runs at temperature 0", reqs4.at(-1).temperature === 0);
 
   // 7c. The Wikipedia-shaped case: 230 rows, a small table nested in one cell,
